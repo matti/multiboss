@@ -30,11 +30,11 @@ case "$1" in
 
     sudo -s ":"
 
-    multipass delete primary || true
+    multipass delete multiboss || true
     multipass purge || true
 
     while true; do
-      [ "$(multipass list | grep primary)" = "" ] && break
+      [ "$(multipass list | grep multiboss)" = "" ] && break
       sleep 0.1
     done
 
@@ -52,13 +52,13 @@ case "$1" in
     # TODO: cloud init stdin
     multipass launch \
       -vvvv \
-      --name primary \
+      --name multiboss \
       --cpus "$cpus" \
       --mem "${mem}G" \
       --disk 50G \
       --cloud-init "$REPO_DIR/cloud-init.yml"
 
-    multipass mount "$HOME" "primary:$HOME"
+    multipass mount "$HOME" "multiboss:$HOME"
     $0 ssh:reset
     $0 ssh uptime
 
@@ -67,14 +67,14 @@ case "$1" in
     $0 fwd
   ;;
   restart)
-    multipass stop -vvvv primary
-    multipass start -vvvv primary
+    multipass stop -vvvv multiboss
+    multipass start -vvvv multiboss
   ;;
   ip)
     while true; do
       ip=""
       set +e
-        ip=$(multipass exec primary -- hostname -I | cut -d' ' -f 1)
+        ip=$(multipass exec multiboss -- hostname -I | cut -d' ' -f 1)
       set -e
       [ "$ip" != "" ] && break
       sleep 0.1
