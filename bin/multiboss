@@ -89,11 +89,30 @@ case "$1" in
     exec $0 ssh tail -n +1 -f /var/log/cloud-init-output.log
   ;;
   fwd)
+    _cleanup_ports() {
+      ports="$@"
+      for control in $(ls $HOME/.ssh/multiboss-*); do
+        control_port=$(basename $control | rev | cut -d'-' -f1 | rev)
+        found=no
+        for port in $ports; do
+          if [ "$control_port" = "$port" ]; then
+            found=yes
+            break
+          fi
+        done
+
+        if [ "$found" = "no" ]; then
+          echo "$control_port remove"
+          (
+            sudo ssh -o ControlPath="$control" -O exit bogus || sudo rm "$control"
+          ) >/dev/null 2>&1
+        fi
+      done
+    }
+
     sudo -s ":"
-    for control in $(ls $HOME/.ssh/multiboss-*); do
-      echo "cleanup: $control"
-      sudo ssh -o ControlPath="$control" -O exit bogus || sudo rm "$control"
-    done
+
+    _cleanup_ports ""
 
     ports=""
     while true; do
@@ -107,12 +126,14 @@ case "$1" in
         esac
 
         if [ -e "$HOME/.ssh/multiboss-$port" ]; then
-          echo "$port already forwarded"
+          :
         else
-          echo "forwarding $port"
+          echo "$port forward"
           $0 sudo:ssh -fNT -o ControlPath="$HOME/.ssh/multiboss-$port" -o ControlMaster=yes "-L 0.0.0.0:$port:127.0.0.1:$port"
         fi
       done
+
+      _cleanup_ports $ports
     done
   ;;
   sudo:ssh)
