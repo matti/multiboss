@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+_echoerr() {
+  1>&2 echo $@
+}
+
+_term() {
+  _echoerr "bye"
+  exit 0
+}
+
+trap _term TERM INT
+
+case "$1" in
+  install)
+    REPO_DIR="$(cd $(dirname "$(readlink "$0")") && pwd)"
+    echo "creating symlink /usr/local/bin/multiboss --> $REPO_DIR/bin/multiboss"
+    if [ -w "/usr/local/bin" ]; then
+      ln -sf "$REPO_DIR/bin/multiboss" /usr/local/bin
+    else
+      sudo ln -sf "$REPO_DIR/bin/multiboss" /usr/local/bin
+    fi
+
+    exit 0
+  ;;
+  recreate)
+    REPO_DIR="$(cd $(dirname "$(readlink "$0")") && cd .. && pwd)"
+
+    sudo -s ":"
+
+    multipass delete primary || true
+    multipass purge || true
+
+    while true; do
+      [ "$(multipass list | grep primary)" = "" ] && break
+      sleep 0.1
+    done
+
+    cpus=$(($(nproc) - 1))
+
+    case "$(uname)" in
+      Linux)
+        mem=$(($(getconf _PHYS_PAGES) * $(getconf PAGE_SIZE) / (1024 * 1024) / 1024) / 4)
+      ;;
+      Darwin)
+        mem=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024 / 4))
+      ;;
+    esac
+
+    # TODO: cloud init stdin
+    multipass launch \
+      -vvvv \
+      --name primary \
+      --cpus "$cpus" \
+      --mem "${mem}G" \
+      --disk 50G \
+      --cloud-init "$REPO_DIR/cloud-init.yml"
+
+    multipass mount "$HOME" "primary:$HOME"
+    $0 ssh:reset
+    $0 ssh uptime
+
+    echo
+    echo "forwarding:"
+    $0 fwd
+  ;;
+  restart)
+    multipass stop -vvvv primary
+    multipass start -vvvv primary
+  ;;
+  ip)
+    while true; do
+      ip=""
+      set +e
+        ip=$(multipass exec primary -- hostname -I | cut -d' ' -f 1)
+      set -e
+      [ "$ip" != "" ] && break
+      sleep 0.1
+    done
+
+    echo "$ip"
+  ;;
+  journal)
+    exec $0 ssh journalctl -f
+  ;;
+  cloud-init-output)
+    exec $0 ssh tail -n +1 -f /var/log/cloud-init-output.log
+  ;;
+  fwd)
+    sudo -s ":"
+    for control in $(ls $HOME/.ssh/multiboss-*); do
+      echo "cleanup: $control"
+      sudo ssh -o ControlPath="$control" -O exit bogus || sudo rm "$control"
+    done
+
+    ports=""
+    while true; do
+      ports=$($0 ssh multiboss-ports $ports)
+
+      for port in $ports; do
+        case "$port" in
+          22|53|68|58)
+            continue
+          ;;
+        esac
+
+        if [ -e "$HOME/.ssh/multiboss-$port" ]; then
+          echo "$port already forwarded"
+        else
+          echo "forwarding $port"
+          $0 sudo:ssh -fNT -o ControlPath="$HOME/.ssh/multiboss-$port" -o ControlMaster=yes "-L 0.0.0.0:$port:127.0.0.1:$port"
+        fi
+      done
+    done
+  ;;
+  sudo:ssh)
+    shift
+    exec sudo $0 ssh $@
+  ;;
+  ssh)
+    shift
+    exec ssh -oStrictHostKeyChecking=accept-new "ubuntu@$($0 ip)" $@
+  ;;
+  ssh:reset)
+    set +e
+      ssh-keygen -R $($0 ip)
+    set -e
+    set +e
+      sudo ssh-keygen -R $($0 ip)
+    set -e
+  ;;
+  *)
+    echo "Help"
+    exit 1
+  ;;
+esac

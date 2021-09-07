@@ -1,0 +1,57 @@
+ssh_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJn/Y0Iw1lsUSQkQK/GeMUQDv/+VjEZ2sGWlFWMz/iGv mpa
+
+packages:
+  - sudo
+  # docker
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg-agent
+
+groups:
+  - docker
+
+write_files:
+  - path: /etc/systemd/system/docker.service.d/override.conf
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/dockerd -H fd:// -H tcp://0.0.0.0:2375 --containerd=/run/containerd/containerd.sock
+  - path: /usr/local/bin/multiboss-ports
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      last_ports="$@"
+      while true; do
+        ports=$(ss --no-header --oneline --numeric --listening --ipv4 --tcp --ipv4 --ipv6 | awk '{print $4}' | rev | cut -d: -f1 | rev | tr '\n' ' ' | xargs)
+        [ "${ports}" != "${last_ports}" ] && break
+        sleep 1
+      done
+
+      echo "$ports"
+
+  - path: /root/multiboss.sh
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      export DEBIAN_FRONTEND=noninteractive
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+      echo \
+        "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+      sudo apt-get update
+
+      sudo apt-get install -y \
+          docker-ce=5:20.10.8~3-0~ubuntu-focal \
+          docker-ce-cli=5:20.10.8~3-0~ubuntu-focal \
+          containerd.io=1.4.9-1
+
+      sudo usermod -aG docker ubuntu
+
+runcmd:
+  - bash /root/multiboss.sh
