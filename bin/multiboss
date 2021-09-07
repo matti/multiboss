@@ -124,6 +124,7 @@ case "$1" in
     exec ssh -oStrictHostKeyChecking=accept-new "ubuntu@$($0 ip)" $@
   ;;
   ssh:reset)
+    sudo -s ":"
     set +e
       ssh-keygen -R $($0 ip)
     set -e
